@@ -62,6 +62,9 @@ exprs <- exprs[which(rownames(exprs) %in% anno$PROBEID),]
 ind <- match(rownames(exprs), anno$PROBEID)
 rownames(exprs) <- anno[ind,]$SYMBOL
 
+e <- cbind(ENTREZID=anno[ind,]$ENTREZID, SYMBOL=anno[ind,]$SYMBOL, exprs)
+write.table(e, "../exprs/exprs_graz.tsv",sep="\t", quote=F, row.names=F)
+
 # Simple PCA
 pca = prcomp(t(exprs))
 pl <- pcaPlots(pca, pd, c("Donor", "Compound"))
@@ -167,9 +170,9 @@ pl <- pheatmap(ht_matrix, cluster_cols = T, cluster_rows = T, drop_levels = F,
          cellheight = 4, cellwidth=17, border_color = NA,
          fontsize_row = 4, fontsize = 8)
 save_plot(paste("../plots/pheatmap_scaled", ".pdf", sep=""),
-          base_height=10, base_width=5, pl, ncol=1)
+          base_height=9.5, base_width=5, pl, ncol=1)
 save_plot(paste("../plots/pheatmap_scaled", ".svg", sep=""),
-          base_height=10, base_width=5, pl, ncol=1)
+          base_height=9.5, base_width=5, pl, ncol=1)
 
 pl <- pheatmap(ht_matrix, cluster_cols = T, cluster_rows = T, drop_levels = F,
                annotation_col = anno_col, scale = "none", treeheight_row = 25, treeheight_col = 20,
