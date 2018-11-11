@@ -50,46 +50,34 @@ pcaPlots <- function(pca.data, pheno.data, meta.vars, title, ncol) {
   return(list(pl, ar))
 }
 
-illuPRatio <- function(df) {
-  df$Ratio <- df$P95Grn / df$P05Grn
-  hl <- df %>% group_by(Matrix) %>% summarize_at(vars(Ratio), mean)
+ggloadings <- function(pca, num_pca=1, num_loading=5, xlab="genes") {
+  loadings <- pca$rotation[,num_pca]
+  loadings <- abs(loadings)
+  loadings <- sort(loadings, decreasing = TRUE)
+  label_names <- names(loadings)
+  loadings <- loadings[1:num_loading]
+  label_names <- label_names[1:num_loading]
+  dat <- data.frame(pc = label_names, loadings = loadings)
+  dat$pc <- factor(dat$pc, levels = unique(dat$pc))
   
-  pl <- ggplot(df, aes(x=Section, y=Ratio)) + 
-        geom_dotplot(binaxis='y') + ylab("P95 / P05") +
-        geom_hline(aes(yintercept = Ratio), data=hl, linetype = "dashed", color='steelblue') +
-        facet_grid(. ~ Matrix)
-  
-  return(pl)
+  p <- ggplot(dat, aes(x = pc, y = loadings))
+  p <- p + geom_bar(stat = "identity")
+  p <- p + xlab(xlab) + ylab("contribution scores")
+  return(p)
 }
 
-geneRegr <- function(df, gene, var, group, x=median(df[,var], na.rm=T), coord=FALSE, maxy=0, miny=0) {
-  df <- df[which(!outlier(df[,gene], logical=T)),]
-  m <- lm(as.formula(paste(var, " ~ ", gene, sep="")), df);
-  pl <- ggplot(df,aes_string(x=var,y=gene, colour=group)) + 
-        geom_point() + geom_smooth(method=lm, linetype=1, colour="black", se=T, size=0.7) +
-        #scale_colour_manual(values=c("green", "red", "blue")) +
-        annotate("text", x=min(df[,var]+2.5, na.rm=T), y=max(df[,gene])-0.3, label=paste("R=",round(summary(m)$r.squared, digits = 3)), color="black", size=4) +
-        geom_vline(aes(xintercept = x), linetype = "dashed", color='grey22') +
-        theme_grey()
-  
-  if (coord) {
-    pl <- pl + coord_cartesian(ylim=c(maxy,miny))
-  }
-  
-  return(pl)
+draw_colnames_45 <- function (coln, gaps, ...) {
+  coord <- pheatmap:::find_coordinates(length(coln), gaps)
+  x     <- coord$coord - 0.5 * coord$size
+  res   <- grid::textGrob(
+    coln, x = x, y = unit(1, "npc") - unit(3,"bigpts"),
+    vjust = 0.75, hjust = 1, rot = 45, gp = grid::gpar(...)
+  )
+  return(res)
 }
 
-corPlot <- function(df, rep1, rep2, title="") {
-  m <- lm(as.formula(paste(rep1, " ~ ", rep2, sep="")), df);
-  pl <- ggplot(df,aes_string(x=rep1,y=rep2)) + 
-    geom_point() + geom_smooth(method=lm, linetype=1, colour="black", se=F, size=0.7) +
-    stat_density2d(aes(fill=..level..,alpha=..level..),geom='polygon', colour='black', alpha=0.5) + 
-    scale_fill_continuous(low="#2FFF71", high="#FF4C48") +
-    annotate("text", x=min(df[,rep1]+2.5, na.rm=T), y=max(df[,rep2])-0.3, label=paste("R=",round(summary(m)$r.squared, digits = 3)), color="black", size=4) +
-    geom_vline(aes(xintercept = median(df[,rep1], na.rm=T)), linetype = "dashed", color='grey22') +
-    geom_hline(aes(yintercept = median(df[,rep2], na.rm=T)), linetype = "dashed", color='grey22') +
-    theme_grey() + ggtitle(title) + theme(plot.title = element_text(size=12))
-  
-  return(pl)
-}
-
+assignInNamespace(
+  x = "draw_colnames",
+  value = "draw_colnames_45",
+  ns = asNamespace("pheatmap")
+)
