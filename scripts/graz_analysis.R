@@ -134,7 +134,7 @@ fit <- eBayes(fit)
 
 ## Get all the genes with logFC, p-values, no filtering
 degs <- topTable(fit, adjust.method="fdr", number=nrow(fit), coef="CompoundCX3CL1 stimulated")
-degs <- filterDEGS(degs, 0.01, 0.5, adj=F)
+degs <- filterDEGS(degs, 0.05, 0.5, adj=F)
 
 ## Add description
 anno_name<-select(org.Hs.eg.db, rownames(degs), c("GENENAME", "SYMBOL"), keytype="ENTREZID")
@@ -146,7 +146,7 @@ degs$ENTREZID <- rownames(degs)
 degs$FC <- sign(degs$logFC)*(2^abs(degs$logFC))
 degs <- degs[,c("SYMBOL", "ENTREZID","logFC", "FC", "P.Value", "adj.P.Val", "description")]
   
-write.table(degs, "../degs/degs_graz.tsv",sep="\t", quote=F, row.names=FALSE)
+write.table(degs, "../degs/degs_graz_05.tsv",sep="\t", quote=F, row.names=FALSE)
 
 ## Heatmap on significant genes
 rownames(exprs) <- anno[ind,]$SYMBOL
