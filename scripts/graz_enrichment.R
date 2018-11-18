@@ -3,6 +3,7 @@ library(GOplot)
 library(topGO)
 library(org.Hs.eg.db)
 library(Rgraphviz)
+library(dplyr)
 
 
 # Read data
@@ -97,3 +98,12 @@ GOHeat(chord[,-8], nlfc = 0)
 
 GOHeat(chord, nlfc = 1, fill.col = c('red', 'gray95', 'green'))
 
+### HPO
+
+hpo.raw <- read.table("../pdata/HPO_phenotype_to_genes.tsv",sep="\t", header = T,
+                   stringsAsFactors = F, quote = "")
+
+hpo <- hpo.raw %>% group_by(HPOID) %>% summarize(Genes = paste(GeneName, collapse="\t"), Term = POName[1])
+hpo <- hpo[, c(1, 3, 2)]
+
+write.table(hpo, "../pdata/hpo.gmt",sep="\t", quote=F, row.names=F, col.names = F)
