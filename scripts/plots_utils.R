@@ -114,12 +114,12 @@ GOHeat <- function (data, nlfc, fill.col)
                                                                                                                                               each = nterm))
   df_o <- df[order(df$x), ]
   g <- ggplot() +
-    geom_tile(data = df_o, aes(x = x, y = y, fill = z)) +
+    geom_tile(data = df_o, aes(x = x, y = y, fill = z), colour="white", size=0.25) +
     scale_x_discrete(breaks = 1:length(unique(df_o$x)), labels = unique(df_o$lab)) +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    theme(axis.text.x = element_text(size = 11, angle=60, hjust=1),
           axis.title.x = element_blank(),
           axis.title.y = element_blank(), 
-          axis.text.y = element_text(size = 14),
+          axis.text.y = element_text(size = 12),
           panel.background = element_blank(), 
           panel.grid.major = element_blank(),
           panel.grid.minor = element_blank()) +
@@ -129,7 +129,9 @@ GOHeat <- function (data, nlfc, fill.col)
                              mid = fill.col[3], high = fill.col[1])
   }
   else {
-    g + scale_fill_gradient2("logFC", space = "Lab", low = fill.col[3], 
-                             mid = fill.col[2], high = fill.col[1])
+    g + scale_fill_gradient2("FC", space = "Lab", low = fill.col[3], 
+                             mid = fill.col[2], high = fill.col[1],
+                             limits=c(round(min(df_o$z), 2)-0.1, round(max(df_o$z), 2)+0.1),
+                             breaks = c(round(min(df_o$z), 2), 0, round(max(df_o$z), 2)))
   }
 }

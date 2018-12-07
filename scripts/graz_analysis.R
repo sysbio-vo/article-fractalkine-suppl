@@ -1,13 +1,11 @@
 library(oligo)
+library(hugene20sthsentrezg.db)
+library(limma)
 library(arrayQualityMetrics)
-library(sva)
-library(stringr) 
 library(ggplot2)
 library(ggfortify)
-library(heatmap3)
-library(limma)
-library(hugene20sthsentrezg.db)
 library(factoextra)
+library(pheatmap)
 source("plots_utils.R")
 source("degs_utils.R")
 
@@ -19,14 +17,6 @@ source("degs_utils.R")
 
 # Read pheno and raw data
 pd <- read.table("../pdata/pdata_FHR_graz.tsv", header = TRUE, sep = "\t", stringsAsFactors = F)
-
-removeOutliers = TRUE
-plname = ""
-if (removeOutliers) {
-  pd <- pd[which(pd$Donor!="donor5"),]
-  pd <- pd[which(pd$Donor!="donor6"),]
-  plname = "_nooutliers"
-}
 
 celFiles <- paste("../raws/", pd$FileName, sep="")
 rawData <- oligo::read.celfiles(filenames=celFiles, pkgname="pd.hugene20st.hs.entrezg")
@@ -40,7 +30,7 @@ eset = oligo::rma(rawData)
 
 # Create quality control report
 arrayQualityMetrics(expressionset = eset,
-                    outdir = paste("../plots/AQM_report_graz", plname, sep=""),
+                    outdir = paste("../plots/AQM_report_graz", sep=""),
                     force = TRUE,
                     do.logtransform = FALSE,
                     intgroup = c("Donor"))
@@ -67,43 +57,40 @@ write.table(e, "../exprs/exprs_graz.tsv",sep="\t", quote=F, row.names=F)
 
 # Simple PCA
 pca = prcomp(t(exprs))
-pl <- pcaPlots(pca, pd, c("Donor", "Compound"))
-save_plot(paste("../plots/graz_PCA", plname, ".pdf", sep=""),
+pl <- pcaPlots(pca, pd, c("Donor", "Stimulus"))
+save_plot(paste("../plots/graz_PCA.pdf", sep=""),
           base_height=3, base_aspect_ratio = pl[[2]]/2, pl[[1]], ncol=2)
-save_plot(paste("../plots/graz_PCA", plname, ".svg", sep=""),
+save_plot(paste("../plots/graz_PCA.svg", sep=""),
           base_height=3, base_aspect_ratio = pl[[2]]/2, pl[[1]], ncol=2)
 
-# Fancy PCA
-
-## PCA percentage
+# PCA percentage of variance
 pl <- fviz_eig(pca)
-save_plot(paste("../plots/graz_PCA_percentage", plname, ".pdf", sep=""),
+save_plot(paste("../plots/graz_PCA_var_percentage.pdf", sep=""),
           base_height=3, base_width=6, pl, ncol=1)
-save_plot(paste("../plots/graz_PCA_percentage", plname, ".svg", sep=""),
+save_plot(paste("../plots/graz_PCA_var_percentage.svg", sep=""),
           base_height=3, base_width=6, pl, ncol=1)
 
-## PCA loadings
+# PCA loadings
 pl <- ggloadings(pca, num_pca=1)
-save_plot(paste("../plots/graz_PCA1_loadings", plname, ".pdf", sep=""),
+save_plot(paste("../plots/graz_PCA_loadings_1.pdf", sep=""),
           base_height=3, base_width=6, pl, ncol=1)
-save_plot(paste("../plots/graz_PCA1_loadings", plname, ".svg", sep=""),
+save_plot(paste("../plots/graz_PCA_loadings_1.svg", sep=""),
           base_height=3, base_width=6, pl, ncol=1)
 pl <- ggloadings(pca, num_pca=2)
-save_plot(paste("../plots/graz_PCA2_loadings", plname, ".pdf", sep=""),
+save_plot(paste("../plots/graz_PCA_loadings_2.pdf", sep=""),
           base_height=3, base_width=6, pl, ncol=1)
-save_plot(paste("../plots/graz_PCA2_loadings", plname, ".svg", sep=""),
+save_plot(paste("../plots/graz_PCA_loadings_2.svg", sep=""),
           base_height=3, base_width=6, pl, ncol=1)
 
-
-## PCA quality of representation
+# PCA quality of representation
 pl <- fviz_pca_ind(pca, col.ind = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
                    repel = TRUE)
-save_plot(paste("../plots/graz_PCA_cos", plname, ".pdf", sep=""),
+save_plot(paste("../plots/graz_PCA_cos.pdf", sep=""),
           base_height=5, pl, ncol=1)
-save_plot(paste("../plots/graz_PCA_cos", plname, ".svg", sep=""),
+save_plot(paste("../plots/graz_PCA_cos.svg", sep=""),
           base_height=5, pl, ncol=1)
 
-## PCA loadings on 2D
+# PCA loadings on 2D
 indCol <- brewer.pal(length(levels(factor(pd$Donor))),"Set3")
 individuals <- as.character(factor(pd$Donor, labels=indCol))
 
@@ -120,65 +107,47 @@ pl <- fviz_pca_biplot(pca,
                 select.var = list(contrib=5),
                 invisible = "quali"
 ) + labs(fill = "Donor")
-save_plot(paste("../plots/graz_PCA_loadings", plname, ".pdf", sep=""),
+save_plot(paste("../plots/graz_PCA_loadings.pdf", sep=""),
           base_height=6, pl, ncol=1)
-save_plot(paste("../plots/graz_PCA_loadings", plname, ".svg", sep=""),
+save_plot(paste("../plots/graz_PCA_loadings.svg", sep=""),
           base_height=6, pl, ncol=1)
 
 # Get differentially expressed genes
-pd$Compound <- factor(pd$Compound, levels=c("unstimulated", "CX3CL1 stimulated"))
-design = model.matrix(~Donor+Compound, data=pd)
+pd$Stimulus <- factor(pd$Stimulus, levels=c("none", "CX3CL1"))
+design = model.matrix(~Stimulus+Donor, data=pd)
 rownames(exprs) <- anno[ind,]$ENTREZID
 fit <- lmFit(exprs, design)
 fit <- eBayes(fit)
 
-## Get all the genes with logFC, p-values, no filtering
-degs <- topTable(fit, adjust.method="fdr", number=nrow(fit), coef="CompoundCX3CL1 stimulated")
-degs <- filterDEGS(degs, 0.05, 0.5, adj=F)
+# Get all the genes with logFC, p-values, no filtering
+degs <- topTable(fit, adjust.method="fdr", number=nrow(fit), coef="StimulusCX3CL1")
+# Filter
+degs <- filterDEGS(degs, 0.01, 0.5, adj=F)
 
-## Add description
+# Add description
 anno_name<-select(org.Hs.eg.db, rownames(degs), c("GENENAME", "SYMBOL"), keytype="ENTREZID")
 degs$description <- anno_name$GENENAME
 degs$SYMBOL <- anno_name$SYMBOL
 degs$ENTREZID <- rownames(degs)
 
-## Add FC and rearrange columns
+# Add FC and rearrange columns
 degs$FC <- sign(degs$logFC)*(2^abs(degs$logFC))
 degs <- degs[,c("SYMBOL", "ENTREZID","logFC", "FC", "P.Value", "adj.P.Val", "description")]
   
-write.table(degs, "../degs/degs_graz_05.tsv",sep="\t", quote=F, row.names=FALSE)
+write.table(degs, "../degs/degs_graz.tsv",sep="\t", quote=F, row.names=FALSE)
 
-## Heatmap on significant genes
+# Heatmap on significant genes
 rownames(exprs) <- anno[ind,]$SYMBOL
 exprs.degs <- exprs[which(rownames(exprs) %in% degs$SYMBOL),]
 ht_matrix <- exprs.degs
 
-library(pheatmap)
-
-
-quantile_breaks <- function(xs, n = 10) {
-  breaks <- quantile(xs, probs = seq(0, 1, length.out = n))
-  breaks[!duplicated(breaks)]
-}
-
-breaks <- quantile_breaks(ht_matrix, n = 100)
-
-anno_col <- pd[,c("Donor", "Compound")]
+anno_col <- pd[,c("Donor", "Stimulus")]
 
 pl <- pheatmap(ht_matrix, cluster_cols = T, cluster_rows = T, drop_levels = F,
          annotation_col = anno_col, scale = "row", treeheight_row = 40, treeheight_col = 20,
          cellheight = 4, cellwidth=17, border_color = NA,
-         fontsize_row = 4, fontsize = 8)
-save_plot(paste("../plots/pheatmap_scaled", ".pdf", sep=""),
+         fontsize_row = 4, fontsize = 8, silent=T)
+save_plot(paste("../plots/degs_graz_heatmap.pdf", sep=""),
           base_height=9.5, base_width=5, pl, ncol=1)
-save_plot(paste("../plots/pheatmap_scaled", ".svg", sep=""),
-          base_height=9.5, base_width=5, pl, ncol=1)
-
-pl <- pheatmap(ht_matrix, cluster_cols = T, cluster_rows = T, drop_levels = F,
-               annotation_col = anno_col, scale = "none", treeheight_row = 25, treeheight_col = 20,
-               cellheight = 4, cellwidth=17, border_color = NA,
-               fontsize_row = 4, fontsize = 8, hjust=3)
-save_plot(paste("../plots/pheatmap", ".pdf", sep=""),
-          base_height=9.5, base_width=5, pl, ncol=1)
-save_plot(paste("../plots/pheatmap", ".svg", sep=""),
+save_plot(paste("../plots/degs_graz_heatmap.svg", sep=""),
           base_height=9.5, base_width=5, pl, ncol=1)

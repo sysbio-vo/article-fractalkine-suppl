@@ -1,35 +1,36 @@
 library(enrichR)
-library(GOplot)
 library(topGO)
 library(org.Hs.eg.db)
-library(Rgraphviz)
 library(dplyr)
-
+library(PPInfer)
+library(GOstats)
+source("plots_utils.R")
 
 # Read data
-
-#degs <- read.table("../degs/degs_graz_all.tsv",sep="\t", header = T,
-#                   stringsAsFactors = F, quote = "")
 degs <- read.table("../degs/degs_graz.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
 exprs <- read.table("../exprs/exprs_graz.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
+mpo_mt <- read.table("../degs/graz_MPO_matrix_shinygo.tsv",sep="\t", header = T,
+                             stringsAsFactors = F, quote = "", check.names = F)
+proteins <- read.table("../degs/degs_graz_known_proteins.tsv",sep="\t", header = T,
+                   stringsAsFactors = F, quote = "")
+genes <- read.table("../degs/degs_graz_known_genes.tsv",sep="\t", header = T,
+                    stringsAsFactors = F, quote = "")
+chloc <- read.table("../degs/degs_graz_chrom_loc.tsv",sep="\t", header = T,
+                    stringsAsFactors = F, quote = "")
 
 
-### EnrichR
+# EnrichR
 dbs <- listEnrichrDbs()
 dbs <- c("MGI_Mammalian_Phenotype_2017")
-enriched <- enrichr(degs$SYMBOL, dbs)
+enriched <- enrichr(genes$SYMBOL, dbs)
 #printEnrich(enriched, "output.txt" , sep = "\t", columns = c(1:9))
 
 bp <- enriched[["MGI_Mammalian_Phenotype_2017"]]
-head(bp)
+mpo <- bp[which(bp$Combined.Score>10),]
 
-bp <- bp[which(bp$P.value<0.01),]
-
-mpo <- bp
 mpo$Category <- "MPO"
-
 l <- t(sapply(mpo$Term, function(x) {
                     v <- unlist(strsplit(x, "_", fixed = FALSE, perl = FALSE, useBytes = FALSE))
                     id <- v[1]
@@ -39,71 +40,119 @@ l <- t(sapply(mpo$Term, function(x) {
 
 mpo$ID <- l[,1]
 mpo$Term <- l[,2]
-mpo$Genes <- gsub(";", ", ", mpo$Genes)
-mpo$adj_pval <- mpo$P.value
-mpo <- mpo[,c("Category", "ID", "Term", "Genes", "adj_pval")]
 
-### topGO
+gen <- unlist(strsplit(paste(mpo$Genes, collapse=";"), ";"))
+gen <- unique(gen)
+m <- matrix(0, ncol = nrow(mpo), nrow = length(gen))
+df <- data.frame(m, row.names = gen)
+colnames(df) <- mpo$Term
 
-genesList <- degs$P.Value
-names(genesList) <- degs$ENTREZID
-sampleGOdata <- new("topGOdata",
-                    description = "Simple session", ontology = "BP",
-                    allGenes = genesList, geneSel = function(x){x<=0.05},
-                    nodeSize = 5,
-                    annot = annFUN.org,mapping="org.Hs.eg.db", ID = "entrez")
-
-resultFisher <- runTest(sampleGOdata, algorithm = "classic", statistic = "fisher")
-resultFisher
-resultKS <- runTest(sampleGOdata, algorithm = "classic", statistic = "ks")
-resultKS
-resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", statistic = "ks")
-resultKS.elim
-allRes <- GenTable(sampleGOdata, classicFisher = resultFisher,
-                   classicKS = resultKS, elimKS = resultKS.elim,
-                   orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 15)
-
-pValue.classic <- score(resultKS)
-pValue.elim <- score(resultKS.elim)[names(pValue.classic)]
-gstat <- termStat(sampleGOdata, names(pValue.classic))
-gSize <- gstat$Annotated / max(gstat$Annotated) * 4
-colMap <- function(x) {
-  .col <- rep(rev(heat.colors(length(unique(x)))), time = table(x))
-  return(.col[match(1:length(x), order(x))])
+g <- strsplit(mpo$Genes, ";")
+for (i in 1:length(g)) {
+  df[which(rownames(df) %in% g[[i]]), i] <- 1
 }
-gCol <- colMap(gstat$Significant)
-plot(pValue.classic, pValue.elim, xlab = "p-value classic", ylab = "p-value elim",
-     pch = 19, cex = gSize, col = gCol)
 
-showSigOfNodes(sampleGOdata, score(resultKS.elim), firstSigNodes = 10, useInfo = 'all')
-numSigGenes(sampleGOdata)
+df$FC <- degs$FC[match(rownames(df), degs$SYMBOL)]  
 
-### GOplot
+#GOHeat(df[,-8], nlfc = 0)
+pl <- GOHeat(df, nlfc = 1, fill.col = c('red', 'gray95', 'blue'))
+save_plot(paste("../plots/mpo_heatmap_enrichr.pdf", sep=""),
+          base_height=5, base_width=10, pl, ncol=1)
+save_plot(paste("../plots/mpo_heatmap_enrichr.svg", sep=""),
+          base_height=5, base_width=10, pl, ncol=1)
 
-data(EC)
-EC$genes
-head(EC$david)
-
-go_obj <- EC
-go_obj$eset <- exprs
-go_obj$enrichr <- mpo
-go_obj$process <- mpo$Term
-go_obj$genes <- degs[,c("SYMBOL", "logFC")]
-colnames(go_obj$genes) <- c("ID", "logFC")
-go_obj$geneslist <- degs[,c("SYMBOL", "logFC")]
-
-circ <- circle_dat(go_obj$enrichr, EC$genes)
-chord <- chord_dat(circ, go_obj$genes, go_obj$process)
-GOHeat(chord[,-8], nlfc = 0)
-
-GOHeat(chord, nlfc = 1, fill.col = c('red', 'gray95', 'green'))
+# ShinyGO
+mpo_mt$FC <- degs$FC[match(rownames(mpo_mt), degs$SYMBOL)]
+mpo_mt[is.na(mpo_mt)] <- 0
+pl <- GOHeat(mpo_mt, nlfc = 1, fill.col = c('red', 'gray95', 'blue'))
+save_plot(paste("../plots/mpo_heatmap_shinygo.pdf", sep=""),
+          base_height=5, base_width=10, pl, ncol=1)
+save_plot(paste("../plots/mpo_heatmap_shinygo.svg", sep=""),
+          base_height=5, base_width=10, pl, ncol=1)
 
 ### HPO
-
-hpo.raw <- read.table("../pdata/HPO_phenotype_to_genes.tsv",sep="\t", header = T,
+hpo.raw <- read.table("../gsea/HPO_phenotype_to_genes.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
 
 hpo <- hpo.raw %>% group_by(HPOID) %>% summarize(Genes = paste(GeneName, collapse="\t"), Term = POName[1])
 hpo <- hpo[, c(1, 3, 2)]
+write.table(hpo, "../gsea/hpo.gmt",sep="\t", quote=F, row.names=F, col.names = F)
 
-write.table(hpo, "../pdata/hpo.gmt",sep="\t", quote=F, row.names=F, col.names = F)
+# Chromosomal locations
+library(biomaRt)
+
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+# Filter on HGNC symbol, retrieve genomic location and band
+my.symbols <- degs$SYMBOL
+my.regions <- getBM(c("hgnc_symbol", "chromosome_name", "start_position", "end_position", "band"),
+                    filters = c("hgnc_symbol"),
+                    values = list(hgnc_symbol=my.symbols),
+                    mart = ensembl)
+
+joint <- merge(degs, my.regions, by.x="SYMBOL", by.y="hgnc_symbol", all=T)
+joint <- joint[order(abs(joint$logFC), decreasing = T),]
+## Not all the locations were present, I had to edit the file manually afterwards.
+#write.table(joint, "../degs/degs_graz_chrom_loc.tsv",sep="\t", quote=F, row.names=F, col.names = T)
+
+# Download and unpack this file - ftp://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz
+gene.info <- read.table("../misc/Homo_sapiens.gene_info",sep="\t", header = T,
+                    stringsAsFactors = F, quote = "", fill=F, check.names = F, allowEscapes = T,
+                    comment.char = "")
+
+gene.info <- gene.info[,c("GeneID", "type_of_gene")]
+degs.full <- merge(chloc, gene.info, by.x="ENTREZID", by.y="GeneID", all.x=T)
+degs.full[which(degs.full$SYMBOL=="LOC105369845"),]$type_of_gene <- "ncRNA"
+write.table(degs.full, "../degs/degs_graz_full_info.tsv",sep="\t", quote=F, row.names=F, col.names = T)
+
+ch.size <- read.table("../misc/hg38_ch_sizes.tsv",sep="\t", header = T,
+                        stringsAsFactors = F, quote = "", fill=F, check.names = F, allowEscapes = T,
+                        comment.char = "")
+
+bp <- barplot(ch.size$size, border=NA, col="grey80")
+degs.full$chr <- degs.full$chromosome_name
+degs.full$chr[which(degs.full$chr=="X")] <- 23
+degs.full$chr[which(degs.full$chr=="Y")] <- 24
+degs.full$chr <- as.numeric(degs.full$chr)
+degs.full <- degs.full[which(degs.full$status != "WITHDRAWN"),]
+degs.full$type_of_gene <- factor(degs.full$type_of_gene)
+
+with(degs.full,
+     segments(
+       bp[chr,]-0.5,
+       start_position,
+       bp[chr,]+0.5,
+       end_position,
+       col=type_of_gene,
+       lwd=2, 
+       lend=1
+     )
+)
+
+
+library(karyoploteR) 
+library(regioneR)
+
+data <- toGRanges(degs.full[,c("chromosome_name", "start_position", "end_position", "SYMBOL", "type_of_gene")])
+seqlevelsStyle(data) <- "UCSC"
+
+typeCol <- brewer.pal(length(levels(factor(data$type_of_gene))),"Set2")
+type <- factor(data$type_of_gene, labels=typeCol)
+
+
+ncod <- data[which(data$type_of_gene=="ncRNA"),]
+cod <- data[which(data$type_of_gene!="ncRNA"),]
+seqlevelsStyle(ncod) <- "UCSC"
+seqlevelsStyle(cod) <- "UCSC"
+
+pdf("../plots/ch_location.pdf", width=17, height=13)
+kp <- plotKaryotype(genome="hg38", plot.type = 2)
+kpPlotMarkers(kp, data=cod, labels=cod$SYMBOL,
+              text.orientation = "horizontal", label.color = "blue",
+              marker.parts = c(0.2, 0.7, 0.1), r1=0.7, cex=0.7,
+              adjust.label.position = T, clipping = F, data.panel=1)
+kpPlotMarkers(kp, data=ncod, labels=ncod$SYMBOL,
+              text.orientation = "horizontal", label.color = "red",
+              marker.parts = c(0.2, 0.7, 0.1), r1=0.7, cex=0.7,
+              adjust.label.position = T, clipping = F, data.panel=2)
+dev.off()
+
