@@ -1,9 +1,8 @@
 library(enrichR)
-library(topGO)
-library(org.Hs.eg.db)
 library(dplyr)
-library(PPInfer)
-library(GOstats)
+library(biomaRt)
+library(karyoploteR) 
+library(regioneR)
 source("plots_utils.R")
 
 # Read data
@@ -11,7 +10,7 @@ degs <- read.table("../degs/degs_graz.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
 exprs <- read.table("../exprs/exprs_graz.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
-mpo_mt <- read.table("../degs/graz_MPO_matrix_shinygo.tsv",sep="\t", header = T,
+enrich <- read.table("../degs/graz_enrichment_matrix_shinygo_enrichr.tsv",sep="\t", header = T,
                              stringsAsFactors = F, quote = "", check.names = F)
 proteins <- read.table("../degs/degs_graz_known_proteins.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
@@ -61,28 +60,18 @@ save_plot(paste("../plots/mpo_heatmap_enrichr.pdf", sep=""),
 save_plot(paste("../plots/mpo_heatmap_enrichr.svg", sep=""),
           base_height=5, base_width=10, pl, ncol=1)
 
-# ShinyGO
-mpo_mt$FC <- degs$FC[match(rownames(mpo_mt), degs$SYMBOL)]
-mpo_mt[is.na(mpo_mt)] <- 0
-pl <- GOHeat(mpo_mt, nlfc = 1, fill.col = c('red', 'gray95', 'blue'))
-save_plot(paste("../plots/mpo_heatmap_shinygo.pdf", sep=""),
-          base_height=5, base_width=10, pl, ncol=1)
-save_plot(paste("../plots/mpo_heatmap_shinygo.svg", sep=""),
-          base_height=5, base_width=10, pl, ncol=1)
-
-### HPO
-hpo.raw <- read.table("../gsea/HPO_phenotype_to_genes.tsv",sep="\t", header = T,
-                   stringsAsFactors = F, quote = "")
-
-hpo <- hpo.raw %>% group_by(HPOID) %>% summarize(Genes = paste(GeneName, collapse="\t"), Term = POName[1])
-hpo <- hpo[, c(1, 3, 2)]
-write.table(hpo, "../gsea/hpo.gmt",sep="\t", quote=F, row.names=F, col.names = F)
+# ShinyGO & enrichR
+enrich$FC <- degs$FC[match(rownames(enrich), degs$SYMBOL)]
+enrich[is.na(enrich)] <- 0
+pl <- GOHeat(enrich, nlfc = 1, fill.col = c('red', 'gray95', 'blue'))
+save_plot(paste("../plots/enrichment_heatmap.pdf", sep=""),
+          base_height=5, base_width=9, pl, ncol=1)
+save_plot(paste("../plots/enrichment_heatmap.svg", sep=""),
+          base_height=5, base_width=9, pl, ncol=1)
 
 # Chromosomal locations
-library(biomaRt)
-
 ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-# Filter on HGNC symbol, retrieve genomic location and band
+## Filter on HGNC symbol, retrieve genomic location and band
 my.symbols <- degs$SYMBOL
 my.regions <- getBM(c("hgnc_symbol", "chromosome_name", "start_position", "end_position", "band"),
                     filters = c("hgnc_symbol"),
@@ -94,7 +83,7 @@ joint <- joint[order(abs(joint$logFC), decreasing = T),]
 ## Not all the locations were present, I had to edit the file manually afterwards.
 #write.table(joint, "../degs/degs_graz_chrom_loc.tsv",sep="\t", quote=F, row.names=F, col.names = T)
 
-# Download and unpack this file - ftp://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz
+## Download and unpack this file - ftp://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz
 gene.info <- read.table("../misc/Homo_sapiens.gene_info",sep="\t", header = T,
                     stringsAsFactors = F, quote = "", fill=F, check.names = F, allowEscapes = T,
                     comment.char = "")
@@ -108,36 +97,12 @@ ch.size <- read.table("../misc/hg38_ch_sizes.tsv",sep="\t", header = T,
                         stringsAsFactors = F, quote = "", fill=F, check.names = F, allowEscapes = T,
                         comment.char = "")
 
-bp <- barplot(ch.size$size, border=NA, col="grey80")
-degs.full$chr <- degs.full$chromosome_name
-degs.full$chr[which(degs.full$chr=="X")] <- 23
-degs.full$chr[which(degs.full$chr=="Y")] <- 24
-degs.full$chr <- as.numeric(degs.full$chr)
-degs.full <- degs.full[which(degs.full$status != "WITHDRAWN"),]
-degs.full$type_of_gene <- factor(degs.full$type_of_gene)
-
-with(degs.full,
-     segments(
-       bp[chr,]-0.5,
-       start_position,
-       bp[chr,]+0.5,
-       end_position,
-       col=type_of_gene,
-       lwd=2, 
-       lend=1
-     )
-)
-
-
-library(karyoploteR) 
-library(regioneR)
-
+## Plot with karyotypeR package
 data <- toGRanges(degs.full[,c("chromosome_name", "start_position", "end_position", "SYMBOL", "type_of_gene")])
 seqlevelsStyle(data) <- "UCSC"
 
 typeCol <- brewer.pal(length(levels(factor(data$type_of_gene))),"Set2")
 type <- factor(data$type_of_gene, labels=typeCol)
-
 
 ncod <- data[which(data$type_of_gene=="ncRNA"),]
 cod <- data[which(data$type_of_gene!="ncRNA"),]
@@ -155,4 +120,3 @@ kpPlotMarkers(kp, data=ncod, labels=ncod$SYMBOL,
               marker.parts = c(0.2, 0.7, 0.1), r1=0.7, cex=0.7,
               adjust.label.position = T, clipping = F, data.panel=2)
 dev.off()
-
