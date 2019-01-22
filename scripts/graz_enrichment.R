@@ -3,10 +3,18 @@ library(dplyr)
 library(biomaRt)
 library(karyoploteR) 
 library(regioneR)
+library(EnhancedVolcano)
+library(TissueEnrich)
+library(tidyr)
+library(pheatmap)
+library(org.Hs.eg.db)
+library(cowplot)
 source("plots_utils.R")
 
 # Read data
 degs <- read.table("../degs/degs_graz.tsv",sep="\t", header = T,
+                   stringsAsFactors = F, quote = "")
+degs.all <- read.table("../degs/degs_graz_allgenes.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
 exprs <- read.table("../exprs/exprs_graz.tsv",sep="\t", header = T,
                    stringsAsFactors = F, quote = "")
@@ -120,3 +128,140 @@ kpPlotMarkers(kp, data=ncod, labels=ncod$SYMBOL,
               marker.parts = c(0.2, 0.7, 0.1), r1=0.7, cex=0.7,
               adjust.label.position = T, clipping = F, data.panel=2)
 dev.off()
+
+
+
+
+
+## Tissue enrichment
+gs <- GeneSet(geneIds=degs$SYMBOL,organism="Homo Sapiens",geneIdType=SymbolIdentifier())
+bs <- GeneSet(geneIds=degs.all$SYMBOL,organism="Homo Sapiens",geneIdType=SymbolIdentifier())
+diff <- setdiff(geneIds(gs), intersect(geneIds(gs),geneIds(bs)))
+
+gs <- GeneSet(geneIds=setdiff(degs$SYMBOL, diff),organism="Homo Sapiens",geneIdType=SymbolIdentifier())
+
+output<-teEnrichment(inputGenes = gs, backgroundGenes = bs)
+
+seEnrichmentOutput<-output[[1]]
+enrichmentOutput<-setNames(data.frame(assay(seEnrichmentOutput),row.names = rowData(seEnrichmentOutput)[,1]), colData(seEnrichmentOutput)[,1])
+enrichmentOutput$Tissue<-row.names(enrichmentOutput)
+head(enrichmentOutput)
+enrichmentOutput <- enrichmentOutput[which(enrichmentOutput$Tissue.Specific.Genes>0),]
+enrichmentOutput <- enrichmentOutput[which(enrichmentOutput$Log10PValue>0),]
+
+### pval plot
+ggplot(enrichmentOutput,aes(x=reorder(Tissue,-Log10PValue),y=Log10PValue,label = Tissue.Specific.Genes,fill = Tissue))+
+  geom_bar(stat = 'identity')+
+  labs(x='', y = '-LOG10(P-Adjusted)')+
+  theme_bw()+
+  theme(legend.position="none")+
+  theme(plot.title = element_text(hjust = 0.5,size = 20),axis.title = element_text(size=15))+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),panel.grid.major= element_blank(),panel.grid.minor = element_blank())
+
+### FC plot
+ggplot(enrichmentOutput,aes(x=reorder(Tissue,-fold.change),y=fold.change,label = Tissue.Specific.Genes,fill = Tissue))+
+  geom_bar(stat = 'identity')+
+  labs(x='', y = 'Fold change')+
+  theme_bw()+
+  theme(legend.position="none")+
+  theme(plot.title = element_text(hjust = 0.5,size = 20),axis.title = element_text(size=15))+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),panel.grid.major= element_blank(),panel.grid.minor = element_blank())
+
+### Heatmap for tissue specific genes
+seExp<-output[[2]][["Bone Marrow"]]
+exp<-setNames(data.frame(assay(seExp), row.names = rowData(seExp)[,1]), colData(seExp)[,1])
+exp$Gene<-row.names(exp)
+exp<-exp %>% gather(Tissue=1:(ncol(exp)-1))
+
+ggplot(exp, aes(key, Gene)) + geom_tile(aes(fill = value), colour = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue")+
+  labs(x='', y = '') +
+  theme_bw() +
+  guides(fill = guide_legend(title = "Log2(TPM)"))+
+  #theme(legend.position="none")+
+  theme(plot.title = element_text(hjust = 0.5,size = 20),axis.title = element_text(size=15))+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),panel.grid.major= element_blank(),panel.grid.minor = element_blank())
+
+### Genes for specific tissue
+seGroupInf<-output[[3]][["Placenta"]]
+groupInf<-data.frame(assay(seGroupInf))
+print(head(groupInf))
+
+### Heatmap for all genes acrosstissue specific genes
+exps <- c()
+hgenes <- c()
+grInf <- data.frame(assay(output[[3]][[i]]))
+
+for (i in 1:length(output[[2]])) {
+  seExp<-output[[2]][[i]]
+  exp<-setNames(data.frame(assay(seExp), row.names = rowData(seExp)[,1]), colData(seExp)[,1])
+  hgenes <- c(hgenes, rownames(exp))
+  #hgenes <- unique(hgenes)
+  #print(hgenes)
+  seGroupInf<-output[[3]][[i]]
+  groupInf<-data.frame(assay(seGroupInf))
+  grInf <- rbind(grInf, groupInf)
+}
+
+
+### Unmapped genes
+unmapped <- print(geneIds(output[[4]]))
+
+all <- c(as.character(unique(grInf$Gene)), unmapped)
+degs[-which(degs$SYMBOL %in% all),]$SYMBOL
+
+### Heatmap for all the genes
+load("../misc/combine-expression.rda")
+hpa <- dataset[[1]]$expressionData
+anno<-select(org.Hs.eg.db, rownames(hpa), c("GENENAME", "SYMBOL"), keytype="ENSEMBL")
+anno <- anno[which(anno$SYMBOL %in% degs$SYMBOL),]
+hpa <- hpa[which(rownames(hpa) %in% anno$ENSEMBL), ]
+
+ind <- match(anno$ENSEMBL, rownames(hpa))
+rownames(hpa) <- anno$SYMBOL
+hpa <- hpa[apply(hpa, MARGIN = 1, FUN = function(x) sd(x) != 0),]
+exprs.hpa <- exprs[which(exprs$SYMBOL %in% rownames(hpa)),]
+rownames(exprs.hpa) <- exprs.hpa$SYMBOL
+exprs.hpa <- exprs.hpa[,-c(1,2)]
+ind <- match(rownames(hpa), rownames(exprs.hpa))
+exprs.hpa <- exprs.hpa[ind,]
+exprs.m <- rowSums(exprs.hpa[,c(1, 3, 5, 7)])
+exprs.p <- rowSums(exprs.hpa[,c(2, 4, 6, 8)])
+
+hpa$CD16 <-exprs.m
+hpa$CD16.stimulated <-exprs.p
+
+hpa <- hpa[,c("Bone.Marrow", "Heart.Muscle", "Kidney",
+              "Placenta","Smooth.Muscle","Spleen",
+              "CD16", "CD16.stimulated")]
+
+pl <- pheatmap(hpa, cluster_cols = T, cluster_rows = T, drop_levels = F,
+               scale = "row", treeheight_row = 40, treeheight_col = 20,
+               cellheight = 4, cellwidth=17, border_color = NA,
+               fontsize_row = 4, fontsize = 8, silent=T)
+
+save_plot(paste("../plots/tissue/degs_graz_heatmap_tissue.pdf", sep=""),
+          base_height=5, base_width=5, pl, ncol=1)
+save_plot(paste("../plots/tissue/degs_graz_heatmap_tissue.svg", sep=""),
+          base_height=5, base_width=5, pl, ncol=1)
+
+
+
+### Volcano plot
+pl <- EnhancedVolcano(degs.all,
+                      lab = degs.all$SYMBOL,
+                      x = "logFC",
+                      y = "P.Value",
+                      FCcutoff = 0.5,
+                      pCutoff = 0.01,
+                      ylim=c(0, 6),
+                      selectLab = rownames(enrich)
+                      )
+
+save_plot(paste("../plots/volcano.pdf", sep=""),
+          base_height=9, base_width=9, pl, ncol=1)
+save_plot(paste("../plots/volcano.svg", sep=""),
+          base_height=9, base_width=9, pl, ncol=1)
+
+exprs_degs <- exprs[which(exprs$ENTREZID %in% degs$ENTREZID),]
+write.table(exprs_degs, "../exprs/exprs_degs_graz.tsv",sep="\t", quote=F, row.names=F)
